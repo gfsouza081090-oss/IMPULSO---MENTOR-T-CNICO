@@ -198,8 +198,10 @@
     <div class="card">
       <div class="grid">
         <div><label>Nome da turma</label><input id="t_nome" placeholder="Ex.: Martelete 2026.1"></div>
-        <div><label>Trilha</label><input id="t_trilha" placeholder="Ex.: Ajudante → Operador de Martelete" list="trilhas_sugeridas">
-          <datalist id="trilhas_sugeridas"></datalist></div>
+        <div><label>Função atual</label><input id="t_funcao" placeholder="Ex.: Ajudante" list="func_sugeridas">
+          <datalist id="func_sugeridas"></datalist></div>
+        <div><label>Função de destino (trilha)</label><input id="t_destino" placeholder="Ex.: Operador de Martelete" list="dest_sugeridas">
+          <datalist id="dest_sugeridas"></datalist></div>
         <div><label>Status</label><select id="t_status"><option>Planejada</option><option>Em andamento</option><option>Encerrada</option></select></div>
         <div><label>Início</label><input id="t_inicio" type="date"></div>
         <div><label>Término previsto</label><input id="t_fim" type="date"></div>
@@ -727,10 +729,10 @@ function renderResumo(){
   db.colab.forEach(c=>{
     const t=turmaById(c.turmaId);
     const a=db.aval.find(x=>x.colabId===c.id);
-    const tec = a? pill(a.resultado, LABEL[a.resultado].split(' — ')[0]+(a.pend?' ('+a.pend+'p)':'')) : pill('pendente','—');
+    const tec = a? pill(a.resultado, LABEL[a.resultado].split(' — ')[0]+' · '+(a.segBlocked?'méd '+fmt(a.media)+' (seg pend.)':'méd '+fmt(a.media))+(a.pend?' · '+a.pend+'p':'')) : pill('pendente','—');
     let rh='—', seg='—';
-    if(t&&t.modRH){ const m=modResultadoDe('rh',c.id); rh=m? pill(m.cls,m.rot) : pill('pendente','pendente'); }
-    if(t&&t.modSeg){ const m=modResultadoDe('seg',c.id); seg=m? pill(m.cls,m.rot) : pill('pendente','pendente'); }
+    if(t&&t.modRH){ const m=modResultadoDe('rh',c.id); rh=m? pill(m.cls,m.rot+' · méd '+fmt(m.media!=null?m.media:m.total/5)) : pill('pendente','pendente'); }
+    if(t&&t.modSeg){ const m=modResultadoDe('seg',c.id); seg=m? pill(m.cls,m.rot+' · méd '+fmt(m.media!=null?m.media:m.total/5)) : pill('pendente','pendente'); }
     h+=`<tr><td>${esc(c.nome)}</td><td>${esc(t?t.nome:'—')}</td><td>${tec}</td><td>${rh}</td><td>${seg}</td></tr>`;
   });
   el.innerHTML = h+'</tbody></table>';
@@ -831,8 +833,8 @@ function relatorioHTMLInterno(){
       critobs.forEach(cr=>{ h+=`<p><b>${esc(cr.nome)}:</b> ${esc(a.critobs[cr.key])}</p>`; }); }
     if(a.obs) h+=`<div class="sub">Observações gerais</div><p>${esc(a.obs)}</p>`;
     const mrh=modResultadoDe('rh',a.colabId), mseg=modResultadoDe('seg',a.colabId);
-    if(mrh){ h+=`<div class="sub">Módulo RH Comportamental</div><p><span class="pill ${mrh.cls}">${mrh.rot}</span> · Total ${mrh.total}/25${mrh.aval?' · '+esc(mrh.aval):''}</p>`; }
-    if(mseg){ h+=`<div class="sub">Módulo Segurança</div><p><span class="pill ${mseg.cls}">${mseg.rot}</span> · Total ${mseg.total}/25${mseg.aval?' · '+esc(mseg.aval):''}</p>`; }
+    if(mrh){ h+=`<div class="sub">Módulo RH Comportamental</div><p><span class="pill ${mrh.cls}">${mrh.rot}</span> · Média ${fmt(mrh.media!=null?mrh.media:mrh.total/5)} · Total ${mrh.total}/25${mrh.aval?' · '+esc(mrh.aval):''}</p>`; }
+    if(mseg){ h+=`<div class="sub">Módulo Segurança</div><p><span class="pill ${mseg.cls}">${mseg.rot}</span> · Média ${fmt(mseg.media!=null?mseg.media:mseg.total/5)} · Total ${mseg.total}/25${mseg.aval?' · '+esc(mseg.aval):''}</p>`; }
     h+=`<div class="sub">Resumo do diário</div>
         <p>Dias registrados: <b>${d.dias}</b> · Faltas: <b>${d.faltas}</b> · Relatos de segurança: <b>${d.relatos}</b> · Dias com atenção: <b>${d.atencao}</b></p></div>`;
   });
@@ -879,18 +881,21 @@ function bindTurmas(){
   $('#t_salvar').onclick = async ()=>{
     const nome=$('#t_nome').value.trim();
     if(!nome){ alert('Informe o nome da turma.'); return; }
-    db.turmas.push({id:uid(), nome, trilha:$('#t_trilha').value.trim(), status:$('#t_status').value, inicio:$('#t_inicio').value, fim:$('#t_fim').value,
+    const fa=$('#t_funcao').value.trim(), dest=$('#t_destino').value.trim();
+    const trilha=(fa||dest)?(fa+(fa&&dest?' → ':'')+dest):'';
+    db.turmas.push({id:uid(), nome, funcaoAtual:fa, destino:dest, trilha, status:$('#t_status').value, inicio:$('#t_inicio').value, fim:$('#t_fim').value,
                     modRH:$('#t_modRH').checked, modSeg:$('#t_modSeg').checked});
     await Store.set(K.turmas, db.turmas);
-    $('#t_nome').value=''; $('#t_fim').value=''; $('#t_modRH').checked=false; $('#t_modSeg').checked=false;
+    $('#t_nome').value=''; $('#t_fim').value=''; $('#t_funcao').value=''; $('#t_destino').value=''; $('#t_modRH').checked=false; $('#t_modSeg').checked=false;
     renderTurmas(); renderTurmaSelects();
   };
-  $('#t_limpar').onclick = ()=>{ $('#t_nome').value=''; $('#t_fim').value=''; $('#t_trilha').value=''; };
+  $('#t_limpar').onclick = ()=>{ $('#t_nome').value=''; $('#t_fim').value=''; $('#t_funcao').value=''; $('#t_destino').value=''; };
 }
 function renderTurmas(){
   renderTurmaSelects();
-  const dl=$('#trilhas_sugeridas');
-  if(dl){ const nomes=[...new Set(db.turmas.map(t=>t.trilha).filter(Boolean))]; dl.innerHTML=nomes.map(n=>`<option value="${esc(n)}">`).join(''); }
+  const dlf=$('#func_sugeridas'), dld=$('#dest_sugeridas');
+  if(dlf){ const ns=[...new Set(db.turmas.map(t=>t.funcaoAtual).filter(Boolean))]; dlf.innerHTML=ns.map(n=>`<option value="${esc(n)}">`).join(''); }
+  if(dld){ const ns=[...new Set(db.turmas.map(t=>t.destino).filter(Boolean))]; dld.innerHTML=ns.map(n=>`<option value="${esc(n)}">`).join(''); }
   const el=$('#t_lista');
   if(!db.turmas.length){ el.innerHTML='<div class="empty">Nenhuma turma cadastrada ainda.</div>'; return; }
   let h='<table><thead><tr><th>Turma</th><th>Trilha</th><th>Etapas</th><th>Status</th><th>Início</th><th>Colab.</th><th></th></tr></thead><tbody>';
@@ -1199,7 +1204,8 @@ function buildModCriterios(key){
           <textarea id="mob_${key}_${i}" oninput="setModObs('${key}',${i},this.value)" placeholder="Anotações do avaliador..."></textarea></div>
         </div></div>`;
   });
-  h+=`<div class="resultado"><div class="metric"><div class="k">Total</div><div class="v" id="mtot_${key}">—</div></div>
+  h+=`<div class="resultado"><div class="metric"><div class="k">Média (1–5)</div><div class="v" id="mmed_${key}">—</div></div>
+      <div class="metric"><div class="k">Total</div><div class="v" id="mtot_${key}">—</div></div>
       <div class="metric"><div class="k">Máximo</div><div class="v">25</div></div>
       <div class="status"><span class="pill pendente" id="mres_${key}">Preencha as notas</span></div></div>
       <div class="row-actions"><button class="btn" id="msave_${key}">Salvar avaliação</button>
@@ -1220,15 +1226,17 @@ function classificarMod(key){
   const vals=cfg.criterios.map((c,i)=>modEdit[key].notas[i]);
   if(vals.some(v=>v==null)) return {status:'pendente'};
   const total=vals.reduce((a,b)=>a+b,0);
+  const media=total/vals.length;
   const band=bandOf(cfg,total);
-  return {status:'ok', total, cls:band.cls, rot:band.rot};
+  return {status:'ok', total, media, cls:band.cls, rot:band.rot};
 }
 function renderModResultado(key){
   const r=classificarMod(key);
-  const st=$('#mres_'+key), tot=$('#mtot_'+key);
+  const st=$('#mres_'+key), tot=$('#mtot_'+key), med=$('#mmed_'+key);
   if(!st) return;
-  if(r.status==='pendente'){ tot.textContent='—'; st.className='pill pendente'; st.textContent='Preencha as notas'; return; }
-  tot.textContent=r.total; st.className='pill '+r.cls; st.textContent=r.rot;
+  if(r.status==='pendente'){ if(tot)tot.textContent='—'; if(med)med.textContent='—'; st.className='pill pendente'; st.textContent='Preencha as notas'; return; }
+  if(tot)tot.textContent=r.total; if(med)med.textContent=fmt(r.media);
+  st.className='pill '+r.cls; st.textContent=r.rot;
 }
 function carregarMod(key){
   const cid=$('#m_'+key+'_colab').value;
@@ -1248,9 +1256,9 @@ async function salvarMod(key){
   if(r.status==='pendente'){ alert('Preencha as notas dos 5 itens.'); return; }
   db[cfg.dbk]=db[cfg.dbk].filter(a=>a.colabId!==cid);
   db[cfg.dbk].push({id:uid(), colabId:cid, data:$('#m_'+key+'_data').value, aval:$('#m_'+key+'_aval').value.trim(),
-    notas:{...modEdit[key].notas}, obs:{...modEdit[key].obs}, total:r.total, cls:r.cls, rot:r.rot});
+    notas:{...modEdit[key].notas}, obs:{...modEdit[key].obs}, total:r.total, media:r.media, cls:r.cls, rot:r.rot});
   await Store.set(cfg.store, db[cfg.dbk]);
-  alert('Avaliação salva: '+r.rot+' ('+r.total+'/25)');
+  alert('Avaliação salva: '+r.rot+' — média '+fmt(r.media)+' (total '+r.total+'/25)');
   renderResumo();
 }
 function modResultadoDe(key,colabId){ return db[MODULOS[key].dbk].find(a=>a.colabId===colabId); }
