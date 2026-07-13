@@ -188,6 +188,8 @@
   <button data-tab="resumo" data-roles="admin,rh,seguranca">Resumo</button>
   <button data-tab="envioRH" data-roles="admin,rh">Envio ao RH</button>
   <button data-tab="acessos" data-roles="admin">Acessos</button>
+  <button data-tab="historico" data-roles="admin">Histórico</button>
+  <button data-tab="roadmap" data-roles="admin,rh,mentor,seguranca">Roadmap</button>
 </nav>
 
 <main>
@@ -381,6 +383,26 @@
     </div>
     <div class="card"><div id="u_lista"></div></div>
   </section>
+
+  <!-- HISTORICO -->
+  <section class="view" id="historico">
+    <h2>Histórico de atividades</h2>
+    <p class="desc">Registro do que cada usuário fez no sistema (avaliações, cadastros, importações).</p>
+    <div class="card no-print">
+      <div class="selrow">
+        <div><label>Filtrar por usuário</label><select id="hist_user"><option value="">Todos</option></select></div>
+      </div>
+      <div class="row-actions" style="margin-top:0"><button class="btn sec" id="hist_export">Exportar histórico (CSV)</button></div>
+    </div>
+    <div class="card"><div id="hist_lista"></div></div>
+  </section>
+
+  <!-- ROADMAP -->
+  <section class="view" id="roadmap">
+    <h2>Roadmap das etapas & critérios</h2>
+    <p class="desc">As etapas do programa e os critérios de cada avaliação, para consulta.</p>
+    <div id="road_area"></div>
+  </section>
 </main>
 
 <script>
@@ -406,7 +428,7 @@ const Store = {
     }catch(e){ console.error('Store.set',key,e); alert('Não foi possível salvar. Verifique sua conexão e se você está logada.'); }
   }
 };
-const K = {turmas:'impulso_turmas', colab:'impulso_colaboradores', diario:'impulso_diario', aval:'impulso_avaliacoes', avalrh:'impulso_avalrh', avalseg:'impulso_avalseg', users:'impulso_usuarios', sessao:'impulso_sessao'};
+const K = {turmas:'impulso_turmas', colab:'impulso_colaboradores', diario:'impulso_diario', aval:'impulso_avaliacoes', avalrh:'impulso_avalrh', avalseg:'impulso_avalseg', users:'impulso_usuarios', historico:'impulso_historico', sessao:'impulso_sessao'};
 
 /* ---------- Critérios ---------- */
 const CRITERIOS = [
@@ -433,7 +455,7 @@ const CRITERIOS = [
 ];
 
 /* ---------- Estado ---------- */
-let db = {turmas:[], colab:[], diario:[], aval:[], avalrh:[], avalseg:[], users:[]};
+let db = {turmas:[], colab:[], diario:[], aval:[], avalrh:[], avalseg:[], users:[], historico:[]};
 const SENHA_PADRAO = 'MONTISOL2026';
 let sessao = null; // usuário logado
 let atual = {notas:{}, resp:{}, obs:{}}; // avaliação em edição
@@ -444,6 +466,16 @@ const hoje = ()=> new Date().toISOString().slice(0,10);
 const fmt = n=> (n==null?'—':n.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1}));
 const dataBR = d=> d? d.split('-').reverse().join('/') : '';
 const esc = s=> (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dataHoraBR = iso=>{ try{ const d=new Date(iso); return d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(e){ return iso; } };
+async function logar(acao){
+  try{
+    db.historico = db.historico || [];
+    db.historico.push({ts:new Date().toISOString(), usuario: sessao?(sessao.nome||sessao.usuario):'—', perfil: sessao?sessao.perfil:'', acao});
+    if(db.historico.length>1000) db.historico = db.historico.slice(-1000);
+    await Store.set(K.historico, db.historico);
+    if(document.querySelector('#historico.active')) renderHistorico();
+  }catch(e){ console.error('logar',e); }
+}
 
 /* ---------- Init ---------- */
 async function carregarTudo(){
@@ -454,6 +486,7 @@ async function carregarTudo(){
   db.avalrh = await Store.get(K.avalrh) || [];
   db.avalseg = await Store.get(K.avalseg) || [];
   db.users = await Store.get(K.users) || [];
+  db.historico = await Store.get(K.historico) || [];
   renderTurmas(); renderColab(); renderSelects(); renderResumo(); renderUsuarios();
 }
 (async function init(){
@@ -486,6 +519,8 @@ function bindTabs(){
       if(b.dataset.tab==='diario') renderDiarioGrid();
       if(b.dataset.tab==='avalRH') renderModulo('rh');
       if(b.dataset.tab==='avalSeg') renderModulo('seg');
+      if(b.dataset.tab==='historico') renderHistorico();
+      if(b.dataset.tab==='roadmap') renderRoadmap();
     };
   });
 }
@@ -498,6 +533,7 @@ function bindColab(){
     db.colab.push({id:uid(), nome, mat:$('#c_mat').value.trim(), func:$('#c_func').value.trim(),
                    cc:$('#c_cc').value.trim(), turmaId:$('#c_turma').value, inicio:$('#c_inicio').value, mentor:$('#c_mentor').value.trim()});
     await Store.set(K.colab, db.colab);
+    logar('Colaborador cadastrado — '+nome);
     $('#c_nome').value=''; $('#c_mat').value=''; $('#c_cc').value='';
     renderColab(); renderSelects(); renderResumo();
   };
@@ -598,6 +634,7 @@ async function salvarDia(){
     else{ db.diario.push({id:uid(), colabId:r.cid, data, presenca:r.presenca, dia:r.dia, seg:r.seg, frente:r.frente, obs:r.obs}); }
   });
   await Store.set(K.diario, db.diario);
+  logar(recs.length+' registro(s) de diário — '+dataBR(data));
   renderResumo();
   alert(recs.length+' registro(s) salvo(s) para '+dataBR(data)+'.');
 }
@@ -706,6 +743,7 @@ function bindAval(){
       notas:{...atual.notas}, resp:JSON.parse(JSON.stringify(atual.resp)), critobs:{...atual.obs},
       obs:$('#a_obs').value.trim(), media:r.media, seg:r.seg, segBlocked:!!r.segBlocked, resultado:r.resultado, pend:r.pend});
     await Store.set(K.aval, db.aval);
+    logar('Avaliação Técnica salva — '+((colabById(cid)||{}).nome||'')+' · '+LABEL[r.resultado].split(' — ')[0]+' (méd '+fmt(r.media)+')');
     alert('Avaliação salva: '+LABEL[r.resultado]+(r.pend?(' · '+r.pend+' pendência(s)'):''));
     renderResumo();
   };
@@ -834,7 +872,7 @@ function relatorioHTMLInterno(){
     if(a.obs) h+=`<div class="sub">Observações gerais</div><p>${esc(a.obs)}</p>`;
     const mrh=modResultadoDe('rh',a.colabId), mseg=modResultadoDe('seg',a.colabId);
     if(mrh){ h+=`<div class="sub">Módulo RH Comportamental</div><p><span class="pill ${mrh.cls}">${mrh.rot}</span> · Média ${fmt(mrh.media!=null?mrh.media:mrh.total/5)} · Total ${mrh.total}/25${mrh.aval?' · '+esc(mrh.aval):''}</p>`; }
-    if(mseg){ h+=`<div class="sub">Módulo Segurança</div><p><span class="pill ${mseg.cls}">${mseg.rot}</span> · Média ${fmt(mseg.media!=null?mseg.media:mseg.total/5)} · Total ${mseg.total}/25${mseg.aval?' · '+esc(mseg.aval):''}</p>`; }
+    if(mseg){ const det = mseg.medA!=null? ('Participante '+fmt(mseg.medA)+' · Responsável '+fmt(mseg.medB)+' · ') : ''; h+=`<div class="sub">Módulo Segurança</div><p><span class="pill ${mseg.cls}">${mseg.rot}</span> · ${det}Média final ${fmt(mseg.media!=null?mseg.media:mseg.total/5)}${mseg.aval?' · '+esc(mseg.aval):''}</p>`; }
     h+=`<div class="sub">Resumo do diário</div>
         <p>Dias registrados: <b>${d.dias}</b> · Faltas: <b>${d.faltas}</b> · Relatos de segurança: <b>${d.relatos}</b> · Dias com atenção: <b>${d.atencao}</b></p></div>`;
   });
@@ -859,8 +897,11 @@ function exportConsolidado(){
   const lista=avaliados();
   if(!lista.length){ alert('Nenhuma avaliação final registrada.'); return; }
   const head=['Colaborador','Trilha','Matrícula','Função','CC','Data avaliação','Mentor'];
-  CRITERIOS.forEach(c=>head.push(c.nome));
-  head.push('Média','Segurança','Pendências','Resultado','Obs. critérios','Dias diário','Faltas','Relatos segurança','Observações');
+  CRITERIOS.forEach(c=>head.push('Téc: '+c.nome));
+  head.push('Téc. Média','Téc. Critério Segurança','Téc. Pendências','Téc. Resultado','Téc. Obs. critérios');
+  head.push('RH Resultado','RH Média','RH Total');
+  head.push('Seg Participante','Seg Responsável','Seg Média final','Seg Resultado');
+  head.push('Dias diário','Faltas','Relatos segurança','Observações');
   const linhas=[head];
   lista.forEach(a=>{ const c=colabById(a.colabId)||{}; const d=diarioStats(a.colabId);
     const row=[c.nome,trilhaDoColab(c),c.mat,c.func,c.cc,dataBR(a.data),a.mentor];
@@ -868,7 +909,12 @@ function exportConsolidado(){
       row.push(blk?'Pendência':(a.notas[cr.key]!=null?a.notas[cr.key]:'')); });
     const obsCrit = CRITERIOS.filter(cr=>a.critobs&&(a.critobs[cr.key]||'').trim())
       .map(cr=>cr.nome+': '+a.critobs[cr.key]).join(' | ');
-    row.push(fmt(a.media), a.segBlocked?'Pendência':fmt(a.seg), a.pend||0, LABEL[a.resultado], obsCrit, d.dias, d.faltas, d.relatos, a.obs);
+    row.push(fmt(a.media), a.segBlocked?'Pendência':fmt(a.seg), a.pend||0, LABEL[a.resultado], obsCrit);
+    const mrh=modResultadoDe('rh',a.colabId);
+    row.push(mrh?mrh.rot:'', mrh?fmt(mrh.media!=null?mrh.media:mrh.total/5):'', mrh?(mrh.total!=null?mrh.total:''):'');
+    const mseg=modResultadoDe('seg',a.colabId);
+    row.push(mseg&&mseg.medA!=null?fmt(mseg.medA):'', mseg&&mseg.medB!=null?fmt(mseg.medB):'', mseg?fmt(mseg.media):'', mseg?mseg.rot:'');
+    row.push(d.dias, d.faltas, d.relatos, a.obs);
     linhas.push(row); });
   baixarCSV('consolidado_RH_impulso.csv', linhas);
 }
@@ -886,6 +932,7 @@ function bindTurmas(){
     db.turmas.push({id:uid(), nome, funcaoAtual:fa, destino:dest, trilha, status:$('#t_status').value, inicio:$('#t_inicio').value, fim:$('#t_fim').value,
                     modRH:$('#t_modRH').checked, modSeg:$('#t_modSeg').checked});
     await Store.set(K.turmas, db.turmas);
+    logar('Turma criada — '+nome);
     $('#t_nome').value=''; $('#t_fim').value=''; $('#t_funcao').value=''; $('#t_destino').value=''; $('#t_modRH').checked=false; $('#t_modSeg').checked=false;
     renderTurmas(); renderTurmaSelects();
   };
@@ -946,6 +993,7 @@ function bindAcessos(){
     if(usuarioByLogin(user)){ alert('Já existe um usuário com esse login.'); return; }
     db.users.push({id:uid(), nome, usuario:user, perfil:$('#u_perfil').value, senha:SENHA_PADRAO, precisaTrocar:true});
     await Store.set(K.users, db.users);
+    logar('Acesso cadastrado — '+nome+' ('+(PERFIL_LABEL[$('#u_perfil').value]||'')+')');
     $('#u_nome').value=''; $('#u_user').value='';
     renderUsuarios();
   };
@@ -1008,6 +1056,7 @@ async function fazerLogin(){
     sessao = perfilDoEmail(login) || {nome:login, usuario:login, perfil:'admin'};
     $('#lg_user').value=''; $('#lg_pass').value=''; $('#lg_erro').textContent='';
     entrarUI();
+    logar('Entrou no sistema');
     return;
   }
   const u=usuarioByLogin(login);
@@ -1136,6 +1185,7 @@ async function confirmarImport(){
   await Store.set(K.colab, db.colab);
   importData=null; $('#imp_area').innerHTML=''; $('#imp_file').value='';
   renderColab(); renderSelects(); renderTurmas(); renderResumo();
+  logar(add+' colaborador(es) importado(s) via planilha');
   alert(add+' colaborador(es) importado(s).');
 }
 function normData(v){
@@ -1158,7 +1208,8 @@ const MODULOS = {
       {nome:'Visão de futuro', perg:'Onde se vê daqui a 2 anos? O que quer conquistar e como o trabalho ajuda nisso?'},
     ],
     bands:[{min:20,cls:'aprovado',rot:'RECOMENDADO'},{min:15,cls:'banco',rot:'POTENCIAL'},{min:10,cls:'pendente',rot:'AGUARDAR'},{min:0,cls:'reprovado',rot:'NÃO RECOMENDADO'}] },
-  seg: { store:K.avalseg, dbk:'avalseg', modFlag:'modSeg', avaliador:'Avaliador (Segurança)',
+  seg: { store:K.avalseg, dbk:'avalseg', modFlag:'modSeg', avaliador:'Responsável de Segurança', dual:true,
+    labelA:'Visão do participante', labelB:'Avaliação do responsável de segurança',
     criterios:[
       {nome:'Significado da segurança', perg:'O que a segurança do trabalho representa para você nas atividades de manutenção industrial?'},
       {nome:'Diante de condição insegura', perg:'Como você age ao identificar uma condição insegura ou desvio de segurança durante uma atividade?'},
@@ -1166,9 +1217,9 @@ const MODULOS = {
       {nome:'Compromisso com EPIs e procedimentos', perg:'Qual seu compromisso com o uso de EPIs, cumprimento de procedimentos e análise de risco antes das atividades?'},
       {nome:'Fortalecer a cultura', perg:'De que forma você pode contribuir para fortalecer a cultura de segurança e prevenção de acidentes na Montisol?'},
     ],
-    bands:[{min:20,cls:'aprovado',rot:'APTO'},{min:15,cls:'banco',rot:'APTO C/ RESSALVAS'},{min:10,cls:'pendente',rot:'DESENVOLVER'},{min:0,cls:'reprovado',rot:'NÃO APTO'}] }
+    bandsMedia:[{min:4,cls:'aprovado',rot:'APTO'},{min:3,cls:'banco',rot:'APTO C/ RESSALVAS'},{min:2,cls:'pendente',rot:'DESENVOLVER'},{min:0,cls:'reprovado',rot:'NÃO APTO'}] }
 };
-let modEdit = { rh:{notas:{},obs:{}}, seg:{notas:{},obs:{}} };
+let modEdit = { rh:{notas:{},notas2:{},obs:{}}, seg:{notas:{},notas2:{},obs:{}} };
 
 function colabsComModulo(flag){ return db.colab.filter(c=>{ const t=turmaById(c.turmaId); return t && t[flag]; }); }
 function bandOf(cfg,total){ return cfg.bands.find(b=>total>=b.min) || cfg.bands[cfg.bands.length-1]; }
@@ -1185,7 +1236,7 @@ function renderModulo(key){
       <div><label>${cfg.avaliador}</label><input id="m_${key}_aval" placeholder="Nome"></div>
     </div>
     ${lista.length?'':'<div class="note-inline">Nenhum colaborador em turma com este módulo. Ative o módulo na aba Turmas.</div>'}`;
-  modEdit[key]={notas:{},obs:{}};
+  modEdit[key]={notas:{},notas2:{},obs:{}};
   buildModCriterios(key);
   $('#m_'+key+'_colab').onchange=()=>carregarMod(key);
   renderModResultado(key);
@@ -1195,24 +1246,40 @@ function buildModCriterios(key){
   let h='';
   cfg.criterios.forEach((c,i)=>{
     h+=`<div class="criterio"><div class="head"><div class="nome">${i+1}. ${esc(c.nome)}</div>
-        <div class="cdesc">“${esc(c.perg)}”</div></div><div class="body">
-        <div class="notas"><span class="lbl">Nota</span><div class="scale" id="msc_${key}_${i}">`;
-    for(let n=1;n<=5;n++) h+=`<button onclick="setModNota('${key}',${i},${n},this)">${n}</button>`;
-    h+=`</div></div>
-        <div class="critobs" style="display:block;border-top:none;margin-top:8px;padding-top:0">
+        <div class="cdesc">“${esc(c.perg)}”</div></div><div class="body">`;
+    if(cfg.dual){
+      h+=`<div class="notas"><span class="lbl" style="min-width:180px">${esc(cfg.labelA)}</span><div class="scale" id="msc_${key}_${i}">`;
+      for(let n=1;n<=5;n++) h+=`<button onclick="setModNota('${key}',${i},${n},this)">${n}</button>`;
+      h+=`</div></div>
+        <div class="notas"><span class="lbl" style="min-width:180px">${esc(cfg.labelB)}</span><div class="scale" id="msc2_${key}_${i}">`;
+      for(let n=1;n<=5;n++) h+=`<button onclick="setModNota2('${key}',${i},${n},this)">${n}</button>`;
+      h+=`</div></div>`;
+    }else{
+      h+=`<div class="notas"><span class="lbl">Nota</span><div class="scale" id="msc_${key}_${i}">`;
+      for(let n=1;n<=5;n++) h+=`<button onclick="setModNota('${key}',${i},${n},this)">${n}</button>`;
+      h+=`</div></div>`;
+    }
+    h+=`<div class="critobs" style="display:block;border-top:none;margin-top:8px;padding-top:0">
           <label style="color:var(--cinza)">Observações</label>
           <textarea id="mob_${key}_${i}" oninput="setModObs('${key}',${i},this.value)" placeholder="Anotações do avaliador..."></textarea></div>
         </div></div>`;
   });
-  h+=`<div class="resultado"><div class="metric"><div class="k">Média (1–5)</div><div class="v" id="mmed_${key}">—</div></div>
-      <div class="metric"><div class="k">Total</div><div class="v" id="mtot_${key}">—</div></div>
-      <div class="metric"><div class="k">Máximo</div><div class="v">25</div></div>
-      <div class="status"><span class="pill pendente" id="mres_${key}">Preencha as notas</span></div></div>
-      <div class="row-actions"><button class="btn" id="msave_${key}">Salvar avaliação</button>
+  if(cfg.dual){
+    h+=`<div class="resultado"><div class="metric"><div class="k">Participante</div><div class="v" id="mmedA_${key}">—</div></div>
+        <div class="metric"><div class="k">Responsável</div><div class="v" id="mmedB_${key}">—</div></div>
+        <div class="metric"><div class="k">Média final (50/50)</div><div class="v" id="mmed_${key}">—</div></div>
+        <div class="status"><span class="pill pendente" id="mres_${key}">Preencha as notas</span></div></div>`;
+  }else{
+    h+=`<div class="resultado"><div class="metric"><div class="k">Média (1–5)</div><div class="v" id="mmed_${key}">—</div></div>
+        <div class="metric"><div class="k">Total</div><div class="v" id="mtot_${key}">—</div></div>
+        <div class="metric"><div class="k">Máximo</div><div class="v">25</div></div>
+        <div class="status"><span class="pill pendente" id="mres_${key}">Preencha as notas</span></div></div>`;
+  }
+  h+=`<div class="row-actions"><button class="btn" id="msave_${key}">Salvar avaliação</button>
       <button class="btn ghost" id="mclear_${key}">Limpar</button></div>`;
   $('#mod_'+key+'_area').innerHTML=h;
   $('#msave_'+key).onclick=()=>salvarMod(key);
-  $('#mclear_'+key).onclick=()=>{ modEdit[key]={notas:{},obs:{}}; buildModCriterios(key); renderModResultado(key); };
+  $('#mclear_'+key).onclick=()=>{ modEdit[key]={notas:{},notas2:{},obs:{}}; buildModCriterios(key); renderModResultado(key); };
 }
 function setModNota(key,i,n,btn){
   modEdit[key].notas[i]=n;
@@ -1220,32 +1287,59 @@ function setModNota(key,i,n,btn){
   btn.classList.add('sel');
   renderModResultado(key);
 }
+function setModNota2(key,i,n,btn){
+  modEdit[key].notas2[i]=n;
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('sel'));
+  btn.classList.add('sel');
+  renderModResultado(key);
+}
 function setModObs(key,i,v){ modEdit[key].obs[i]=v; }
+function bandOfMedia(cfg,media){ return cfg.bandsMedia.find(b=>media>=b.min) || cfg.bandsMedia[cfg.bandsMedia.length-1]; }
 function classificarMod(key){
   const cfg=MODULOS[key];
-  const vals=cfg.criterios.map((c,i)=>modEdit[key].notas[i]);
-  if(vals.some(v=>v==null)) return {status:'pendente'};
-  const total=vals.reduce((a,b)=>a+b,0);
-  const media=total/vals.length;
+  const valsA=cfg.criterios.map((c,i)=>modEdit[key].notas[i]);
+  if(cfg.dual){
+    const valsB=cfg.criterios.map((c,i)=>modEdit[key].notas2[i]);
+    if(valsA.some(v=>v==null) || valsB.some(v=>v==null)) return {status:'pendente'};
+    const medA=valsA.reduce((a,b)=>a+b,0)/valsA.length;
+    const medB=valsB.reduce((a,b)=>a+b,0)/valsB.length;
+    const media=0.5*medA+0.5*medB;
+    const band=bandOfMedia(cfg,media);
+    return {status:'ok', medA, medB, media, cls:band.cls, rot:band.rot};
+  }
+  if(valsA.some(v=>v==null)) return {status:'pendente'};
+  const total=valsA.reduce((a,b)=>a+b,0);
+  const media=total/valsA.length;
   const band=bandOf(cfg,total);
   return {status:'ok', total, media, cls:band.cls, rot:band.rot};
 }
 function renderModResultado(key){
+  const cfg=MODULOS[key];
   const r=classificarMod(key);
-  const st=$('#mres_'+key), tot=$('#mtot_'+key), med=$('#mmed_'+key);
+  const st=$('#mres_'+key);
   if(!st) return;
-  if(r.status==='pendente'){ if(tot)tot.textContent='—'; if(med)med.textContent='—'; st.className='pill pendente'; st.textContent='Preencha as notas'; return; }
-  if(tot)tot.textContent=r.total; if(med)med.textContent=fmt(r.media);
+  const setV=(id,val)=>{ const e=$(id); if(e) e.textContent=val; };
+  if(r.status==='pendente'){
+    setV('#mmed_'+key,'—'); setV('#mtot_'+key,'—'); setV('#mmedA_'+key,'—'); setV('#mmedB_'+key,'—');
+    st.className='pill pendente'; st.textContent='Preencha as notas'; return;
+  }
+  setV('#mmed_'+key,fmt(r.media));
+  if(cfg.dual){ setV('#mmedA_'+key,fmt(r.medA)); setV('#mmedB_'+key,fmt(r.medB)); }
+  else { setV('#mtot_'+key,r.total); }
   st.className='pill '+r.cls; st.textContent=r.rot;
 }
 function carregarMod(key){
+  const cfg=MODULOS[key];
   const cid=$('#m_'+key+'_colab').value;
-  const ex=db[MODULOS[key].dbk].find(a=>a.colabId===cid);
-  modEdit[key]={notas:{},obs:{}};
-  if(ex){ modEdit[key]={notas:{...ex.notas},obs:{...ex.obs}}; if(ex.data)$('#m_'+key+'_data').value=ex.data; if(ex.aval)$('#m_'+key+'_aval').value=ex.aval; }
+  const ex=db[cfg.dbk].find(a=>a.colabId===cid);
+  modEdit[key]={notas:{},notas2:{},obs:{}};
+  if(ex){ modEdit[key]={notas:{...ex.notas}, notas2:{...(ex.notas2||{})}, obs:{...ex.obs}}; if(ex.data)$('#m_'+key+'_data').value=ex.data; if(ex.aval)$('#m_'+key+'_aval').value=ex.aval; }
   buildModCriterios(key);
-  // re-marcar notas
-  MODULOS[key].criterios.forEach((c,i)=>{ const n=modEdit[key].notas[i]; if(n!=null){ const sc=$('#msc_'+key+'_'+i); if(sc){ const b=sc.querySelectorAll('button')[n-1]; if(b)b.classList.add('sel'); } const ob=$('#mob_'+key+'_'+i); if(ob)ob.value=modEdit[key].obs[i]||''; } });
+  cfg.criterios.forEach((c,i)=>{
+    const n=modEdit[key].notas[i]; if(n!=null){ const sc=$('#msc_'+key+'_'+i); if(sc){ const b=sc.querySelectorAll('button')[n-1]; if(b)b.classList.add('sel'); } }
+    const n2=modEdit[key].notas2[i]; if(n2!=null){ const sc=$('#msc2_'+key+'_'+i); if(sc){ const b=sc.querySelectorAll('button')[n2-1]; if(b)b.classList.add('sel'); } }
+    const ob=$('#mob_'+key+'_'+i); if(ob)ob.value=modEdit[key].obs[i]||'';
+  });
   renderModResultado(key);
 }
 async function salvarMod(key){
@@ -1253,15 +1347,75 @@ async function salvarMod(key){
   const cid=$('#m_'+key+'_colab').value;
   if(!cid){ alert('Selecione o colaborador.'); return; }
   const r=classificarMod(key);
-  if(r.status==='pendente'){ alert('Preencha as notas dos 5 itens.'); return; }
+  if(r.status==='pendente'){ alert(cfg.dual?'Preencha as duas notas (participante e responsável) dos 5 itens.':'Preencha as notas dos 5 itens.'); return; }
   db[cfg.dbk]=db[cfg.dbk].filter(a=>a.colabId!==cid);
-  db[cfg.dbk].push({id:uid(), colabId:cid, data:$('#m_'+key+'_data').value, aval:$('#m_'+key+'_aval').value.trim(),
-    notas:{...modEdit[key].notas}, obs:{...modEdit[key].obs}, total:r.total, media:r.media, cls:r.cls, rot:r.rot});
+  const reg={id:uid(), colabId:cid, data:$('#m_'+key+'_data').value, aval:$('#m_'+key+'_aval').value.trim(),
+    notas:{...modEdit[key].notas}, notas2:{...modEdit[key].notas2}, obs:{...modEdit[key].obs},
+    media:r.media, cls:r.cls, rot:r.rot};
+  if(cfg.dual){ reg.medA=r.medA; reg.medB=r.medB; } else { reg.total=r.total; }
+  db[cfg.dbk].push(reg);
   await Store.set(cfg.store, db[cfg.dbk]);
-  alert('Avaliação salva: '+r.rot+' — média '+fmt(r.media)+' (total '+r.total+'/25)');
+  const c=colabById(cid)||{};
+  logar((key==='rh'?'Avaliação RH':'Avaliação Segurança')+' salva — '+(c.nome||'')+' · '+r.rot+' (méd '+fmt(r.media)+')');
+  alert('Avaliação salva: '+r.rot+' — média '+fmt(r.media));
   renderResumo();
 }
 function modResultadoDe(key,colabId){ return db[MODULOS[key].dbk].find(a=>a.colabId===colabId); }
+
+/* ---------- Histórico ---------- */
+function renderHistorico(){
+  const sel=$('#hist_user');
+  if(sel){ const users=[...new Set((db.historico||[]).map(h=>h.usuario))];
+    const cur=sel.value; sel.innerHTML='<option value="">Todos</option>'+users.map(u=>`<option value="${esc(u)}">${esc(u)}</option>`).join(''); sel.value=cur;
+    sel.onchange=renderHistorico; }
+  const f=sel?sel.value:'';
+  const el=$('#hist_lista');
+  let regs=(db.historico||[]).slice().reverse();
+  if(f) regs=regs.filter(h=>h.usuario===f);
+  if(!regs.length){ el.innerHTML='<div class="empty">Nenhum registro ainda.</div>'; return; }
+  let h='<table><thead><tr><th>Data/hora</th><th>Usuário</th><th>Perfil</th><th>Ação</th></tr></thead><tbody>';
+  regs.slice(0,300).forEach(r=>{ h+=`<tr><td>${dataHoraBR(r.ts)}</td><td>${esc(r.usuario)}</td><td>${PERFIL_LABEL[r.perfil]||esc(r.perfil)}</td><td>${esc(r.acao)}</td></tr>`; });
+  el.innerHTML=h+'</tbody></table>';
+  const btn=$('#hist_export'); if(btn) btn.onclick=()=>{
+    const linhas=[['Data/hora','Usuário','Perfil','Ação']];
+    (db.historico||[]).forEach(r=>linhas.push([dataHoraBR(r.ts),r.usuario,PERFIL_LABEL[r.perfil]||r.perfil,r.acao]));
+    baixarCSV('historico_impulso.csv',linhas);
+  };
+}
+
+/* ---------- Roadmap & Critérios ---------- */
+function renderRoadmap(){
+  const etapas=[
+    {n:'1', t:'Diário de treinamento', d:'Registro diário do mentor durante o treinamento (presença, atividades, segurança).', perfil:'Mentor'},
+    {n:'2', t:'Avaliação Técnica (Mentor)', d:'5 critérios, nota 0 a 5, com questões Sim/Não. "Não" vira pendência e reprova.', perfil:'Mentor'},
+    {n:'3', t:'Avaliação RH Comportamental', d:'Entrevista com 5 critérios, nota 1 a 5 (total /25). Faixas: Recomendado / Potencial / Aguardar / Não recomendado.', perfil:'RH'},
+    {n:'4', t:'Avaliação de Segurança', d:'5 itens com duas notas (visão do participante + responsável de segurança), média 50/50. Faixas: Apto / Apto c/ ressalvas / Desenvolver / Não apto.', perfil:'Segurança'},
+    {n:'5', t:'Consolidação e envio ao RH', d:'Resumo e relatório com o resultado de cada etapa por colaborador.', perfil:'RH Admin'},
+  ];
+  let h='<div class="card"><div style="display:flex;flex-wrap:wrap;gap:10px;align-items:stretch">';
+  etapas.forEach((e,i)=>{
+    h+=`<div style="flex:1;min-width:150px;border:1px solid var(--linha);border-radius:8px;padding:12px;background:#fff">
+      <div style="width:26px;height:26px;border-radius:50%;background:var(--azul);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;margin-bottom:8px">${e.n}</div>
+      <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:4px">${esc(e.t)}</div>
+      <div style="font-size:12px;color:var(--cinza);margin-bottom:6px">${esc(e.d)}</div>
+      <span class="pill banco" style="font-size:10px">${esc(e.perfil)}</span></div>`;
+    if(i<etapas.length-1) h+='<div style="display:flex;align-items:center;color:var(--azul-med);font-size:22px;font-weight:700">→</div>';
+  });
+  h+='</div></div>';
+  // Critérios de todas as avaliações
+  h+='<div class="card"><h2 style="margin-top:0">Critérios de cada avaliação</h2>';
+  h+='<div class="sub" style="font-weight:700;color:var(--azul);margin:8px 0 6px;text-transform:uppercase;font-size:12px">Avaliação Técnica (0 a 5)</div>';
+  CRITERIOS.forEach((c,i)=>{ h+=`<p style="margin:4px 0"><b>${i+1}. ${esc(c.nome)}</b>${c.seg?' <span style="color:var(--azul-med)">(segurança)</span>':''} — ${esc(c.desc)}<br><span style="font-size:12px;color:var(--cinza)">Q: ${esc(c.q[0])} · ${esc(c.q[1])}</span></p>`; });
+  ['rh','seg'].forEach(key=>{
+    const cfg=MODULOS[key];
+    h+=`<div class="sub" style="font-weight:700;color:var(--azul);margin:14px 0 6px;text-transform:uppercase;font-size:12px">${key==='rh'?'Avaliação RH Comportamental (1 a 5)':'Avaliação de Segurança (1 a 5, dupla nota)'}</div>`;
+    cfg.criterios.forEach((c,i)=>{ h+=`<p style="margin:4px 0"><b>${i+1}. ${esc(c.nome)}</b><br><span style="font-size:12px;color:var(--cinza)">${esc(c.perg)}</span></p>`; });
+    const faixas=(cfg.bands||cfg.bandsMedia).map(b=>b.rot+(cfg.bandsMedia?' (méd ≥'+b.min+')':' ('+b.min+'+)')).join(' · ');
+    h+=`<p style="font-size:12px;color:var(--cinza)"><b>Faixas:</b> ${esc(faixas)}</p>`;
+  });
+  h+='</div>';
+  $('#road_area').innerHTML=h;
+}
 </script>
 </body>
 </html>
