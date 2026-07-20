@@ -828,10 +828,9 @@ function diarioStats(cid){
   };
 }
 function avaliados(){
-  return db.aval.slice().sort((a,b)=>{
-    const na=(colabById(a.colabId)||{}).nome||'', nb=(colabById(b.colabId)||{}).nome||'';
-    return na.localeCompare(nb);
-  });
+  return db.colab.slice()
+    .sort((a,b)=>(a.nome||'').localeCompare(b.nome||''))
+    .map(c=>({colabId:c.id, _tec:db.aval.find(x=>x.colabId===c.id)}));
 }
 function bindRH(){
   $('#rh_gerar').onclick = gerarRelatorioRH;
@@ -841,36 +840,43 @@ function bindRH(){
 }
 function relatorioHTMLInterno(){
   const lista = avaliados();
-  if(!lista.length) return '<div class="empty">Nenhuma avaliação final registrada ainda.</div>';
+  if(!lista.length) return '<div class="empty">Nenhum colaborador cadastrado ainda.</div>';
   const resp = esc($('#rh_resp').value.trim());
   const ciclo = esc($('#rh_ciclo').value.trim());
   const hj = dataBR(hoje());
   let h = `<div class="rh-cover"><h3>Relatório de Avaliação Pós-Treinamento — Programa Impulso</h3>
     <div class="idline">Acompanhamento do Mentor${ciclo?' · '+ciclo:''} · Gerado em ${hj}${resp?' · Responsável: '+resp:''}</div>
-    <table><thead><tr><th>Colaborador</th><th>Trilha</th><th>Matrícula</th><th>Média</th><th>Segurança</th><th>Resultado</th></tr></thead><tbody>`;
-  lista.forEach(a=>{ const c=colabById(a.colabId)||{};
-    h+=`<tr><td>${esc(c.nome)}</td><td>${esc(trilhaDoColab(c)||'—')}</td><td>${esc(c.mat)}</td><td>${fmt(a.media)}</td><td>${a.segBlocked?'Pend.':fmt(a.seg)}</td>
-        <td><span class="pill ${a.resultado}">${LABEL[a.resultado].split(' — ')[0]}</span>${a.pend?' ('+a.pend+' pend.)':''}</td></tr>`; });
+    <table><thead><tr><th>Colaborador</th><th>Trilha</th><th>Matrícula</th><th>Técnica</th><th>RH</th><th>Segurança</th></tr></thead><tbody>`;
+  lista.forEach(o=>{ const c=colabById(o.colabId)||{}; const a=o._tec; const t=turmaById(c.turmaId);
+    const mrh=modResultadoDe('rh',o.colabId), mseg=modResultadoDe('seg',o.colabId);
+    const tec=a?`<span class="pill ${a.resultado}">${LABEL[a.resultado].split(' — ')[0]}</span>`:'<span class="pill pendente">—</span>';
+    const rh=(t&&t.modRH)?(mrh?`<span class="pill ${mrh.cls}">${mrh.rot} (${fmt(mrh.media!=null?mrh.media:mrh.total/5)})</span>`:'<span class="pill pendente">pend.</span>'):'—';
+    const seg=(t&&t.modSeg)?(mseg?`<span class="pill ${mseg.cls}">${mseg.rot} (${fmt(mseg.media)})</span>`:'<span class="pill pendente">pend.</span>'):'—';
+    h+=`<tr><td>${esc(c.nome)}</td><td>${esc(trilhaDoColab(c)||'—')}</td><td>${esc(c.mat)}</td><td>${tec}</td><td>${rh}</td><td>${seg}</td></tr>`; });
   h+='</tbody></table></div>';
-  lista.forEach(a=>{ const c=colabById(a.colabId)||{}; const d=diarioStats(a.colabId);
+  lista.forEach(o=>{ const c=colabById(o.colabId)||{}; const a=o._tec; const d=diarioStats(o.colabId);
     h+=`<div class="rh-doc"><h3>${esc(c.nome)}</h3>
-      <div class="idline">${trilhaDoColab(c)?'Trilha: '+esc(trilhaDoColab(c))+' · ':''}Matrícula ${esc(c.mat)||'—'} · ${esc(c.func)||'—'} · CC ${esc(c.cc)||'—'} · Avaliado em ${dataBR(a.data)}${a.mentor?' · Mentor: '+esc(a.mentor):''}</div>
-      <div class="sub">Avaliação por critério</div>
-      <table><thead><tr><th>Critério</th><th>Q1</th><th>Q2</th><th style="text-align:center">Nota (0–5)</th></tr></thead><tbody>`;
-    CRITERIOS.forEach(cr=>{ const r=(a.resp&&a.resp[cr.key])||{};
-      const blocked = r[0]==='Não'||r[1]==='Não';
-      const y=v=> v==='Sim'?'<span class="yn s">Sim</span>':(v==='Não'?'<span class="yn n">Não</span>':'—');
-      const notaCel = blocked? '<span class="yn n">Pendência</span>' : (a.notas[cr.key]!=null?a.notas[cr.key]:'—');
-      h+=`<tr><td>${esc(cr.nome)}${cr.seg?' <span style="color:var(--azul-med)">(segurança)</span>':''}</td>
-          <td>${y(r[0])}</td><td>${y(r[1])}</td><td style="text-align:center;font-weight:700">${notaCel}</td></tr>`; });
-    h+=`<tr><td colspan="3" style="text-align:right;font-weight:700">Média geral / Segurança</td>
-        <td style="text-align:center;font-weight:800">${fmt(a.media)} / ${a.segBlocked?'Pend.':fmt(a.seg)}</td></tr></tbody></table>`;
-    h+=`<div class="sub">Resultado</div><p><span class="pill ${a.resultado}">${LABEL[a.resultado]}</span>${a.pend?' <span class="pill pendente">'+a.pend+' pendência(s)</span>':''}</p>`;
-    const critobs = CRITERIOS.filter(cr=>a.critobs&&(a.critobs[cr.key]||'').trim());
-    if(critobs.length){ h+='<div class="sub">Pendências e observações por critério</div>';
-      critobs.forEach(cr=>{ h+=`<p><b>${esc(cr.nome)}:</b> ${esc(a.critobs[cr.key])}</p>`; }); }
-    if(a.obs) h+=`<div class="sub">Observações gerais</div><p>${esc(a.obs)}</p>`;
-    const mrh=modResultadoDe('rh',a.colabId), mseg=modResultadoDe('seg',a.colabId);
+      <div class="idline">${trilhaDoColab(c)?'Trilha: '+esc(trilhaDoColab(c))+' · ':''}Matrícula ${esc(c.mat)||'—'} · ${esc(c.func)||'—'} · CC ${esc(c.cc)||'—'}${a?' · Avaliado em '+dataBR(a.data):''}${a&&a.mentor?' · Mentor: '+esc(a.mentor):''}</div>
+      <div class="sub">Avaliação Técnica por critério</div>`;
+    if(a){
+      h+=`<table><thead><tr><th>Critério</th><th>Q1</th><th>Q2</th><th style="text-align:center">Nota (0–5)</th></tr></thead><tbody>`;
+      CRITERIOS.forEach(cr=>{ const r=(a.resp&&a.resp[cr.key])||{};
+        const blocked = r[0]==='Não'||r[1]==='Não';
+        const y=v=> v==='Sim'?'<span class="yn s">Sim</span>':(v==='Não'?'<span class="yn n">Não</span>':'—');
+        const notaCel = blocked? '<span class="yn n">Pendência</span>' : (a.notas[cr.key]!=null?a.notas[cr.key]:'—');
+        h+=`<tr><td>${esc(cr.nome)}${cr.seg?' <span style="color:var(--azul-med)">(segurança)</span>':''}</td>
+            <td>${y(r[0])}</td><td>${y(r[1])}</td><td style="text-align:center;font-weight:700">${notaCel}</td></tr>`; });
+      h+=`<tr><td colspan="3" style="text-align:right;font-weight:700">Média geral / Segurança</td>
+          <td style="text-align:center;font-weight:800">${fmt(a.media)} / ${a.segBlocked?'Pend.':fmt(a.seg)}</td></tr></tbody></table>`;
+      h+=`<div class="sub">Resultado</div><p><span class="pill ${a.resultado}">${LABEL[a.resultado]}</span>${a.pend?' <span class="pill pendente">'+a.pend+' pendência(s)</span>':''}</p>`;
+      const critobs = CRITERIOS.filter(cr=>a.critobs&&(a.critobs[cr.key]||'').trim());
+      if(critobs.length){ h+='<div class="sub">Pendências e observações por critério</div>';
+        critobs.forEach(cr=>{ h+=`<p><b>${esc(cr.nome)}:</b> ${esc(a.critobs[cr.key])}</p>`; }); }
+      if(a.obs) h+=`<div class="sub">Observações gerais</div><p>${esc(a.obs)}</p>`;
+    } else {
+      h+='<p style="color:var(--cinza)">Avaliação técnica ainda não realizada.</p>';
+    }
+    const mrh=modResultadoDe('rh',o.colabId), mseg=modResultadoDe('seg',o.colabId);
     if(mrh){ h+=`<div class="sub">Módulo RH Comportamental</div><p><span class="pill ${mrh.cls}">${mrh.rot}</span> · Média ${fmt(mrh.media!=null?mrh.media:mrh.total/5)} · Total ${mrh.total}/25${mrh.aval?' · '+esc(mrh.aval):''}</p>`; }
     if(mseg){ const det = mseg.medA!=null? ('Participante '+fmt(mseg.medA)+' · Responsável '+fmt(mseg.medB)+' · ') : ''; h+=`<div class="sub">Módulo Segurança</div><p><span class="pill ${mseg.cls}">${mseg.rot}</span> · ${det}Média final ${fmt(mseg.media!=null?mseg.media:mseg.total/5)}${mseg.aval?' · '+esc(mseg.aval):''}</p>`; }
     h+=`<div class="sub">Resumo do diário</div>
@@ -882,7 +888,7 @@ function gerarRelatorioRH(){
   const el=$('#rh_report'); el.className='rh-report'; el.innerHTML = relatorioHTMLInterno();
 }
 function baixarRelatorioHTML(){
-  if(!avaliados().length){ alert('Nenhuma avaliação final registrada.'); return; }
+  if(!avaliados().length){ alert('Nenhum colaborador cadastrado.'); return; }
   const styles = document.querySelector('style').innerHTML;
   const body = relatorioHTMLInterno();
   const full = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
@@ -894,27 +900,31 @@ function baixarRelatorioHTML(){
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='relatorio_RH_impulso.html'; a.click();
 }
 function exportConsolidado(){
-  const lista=avaliados();
-  if(!lista.length){ alert('Nenhuma avaliação final registrada.'); return; }
-  const head=['Colaborador','Trilha','Matrícula','Função','CC','Data avaliação','Mentor'];
+  const lista=db.colab.slice().sort((x,y)=>(x.nome||'').localeCompare(y.nome||''));
+  if(!lista.length){ alert('Nenhum colaborador cadastrado.'); return; }
+  const head=['Colaborador','Trilha','Turma','Matrícula','Função','CC','Data téc.','Mentor'];
   CRITERIOS.forEach(c=>head.push('Téc: '+c.nome));
   head.push('Téc. Média','Téc. Critério Segurança','Téc. Pendências','Téc. Resultado','Téc. Obs. critérios');
   head.push('RH Resultado','RH Média','RH Total');
   head.push('Seg Participante','Seg Responsável','Seg Média final','Seg Resultado');
   head.push('Dias diário','Faltas','Relatos segurança','Observações');
   const linhas=[head];
-  lista.forEach(a=>{ const c=colabById(a.colabId)||{}; const d=diarioStats(a.colabId);
-    const row=[c.nome,trilhaDoColab(c),c.mat,c.func,c.cc,dataBR(a.data),a.mentor];
-    CRITERIOS.forEach(cr=>{ const r=(a.resp&&a.resp[cr.key])||{}; const blk=r[0]==='Não'||r[1]==='Não';
+  lista.forEach(c=>{ const t=turmaById(c.turmaId); const d=diarioStats(c.id);
+    const a=db.aval.find(x=>x.colabId===c.id);
+    const row=[c.nome, trilhaDoColab(c), t?t.nome:'', c.mat, c.func, c.cc, a?dataBR(a.data):'', a?a.mentor:''];
+    CRITERIOS.forEach(cr=>{
+      if(!a){ row.push(''); return; }
+      const r=(a.resp&&a.resp[cr.key])||{}; const blk=r[0]==='Não'||r[1]==='Não';
       row.push(blk?'Pendência':(a.notas[cr.key]!=null?a.notas[cr.key]:'')); });
-    const obsCrit = CRITERIOS.filter(cr=>a.critobs&&(a.critobs[cr.key]||'').trim())
-      .map(cr=>cr.nome+': '+a.critobs[cr.key]).join(' | ');
-    row.push(fmt(a.media), a.segBlocked?'Pendência':fmt(a.seg), a.pend||0, LABEL[a.resultado], obsCrit);
-    const mrh=modResultadoDe('rh',a.colabId);
+    if(a){
+      const obsCrit=CRITERIOS.filter(cr=>a.critobs&&(a.critobs[cr.key]||'').trim()).map(cr=>cr.nome+': '+a.critobs[cr.key]).join(' | ');
+      row.push(fmt(a.media), a.segBlocked?'Pendência':fmt(a.seg), a.pend||0, LABEL[a.resultado], obsCrit);
+    } else { row.push('','','','Não avaliada',''); }
+    const mrh=modResultadoDe('rh',c.id);
     row.push(mrh?mrh.rot:'', mrh?fmt(mrh.media!=null?mrh.media:mrh.total/5):'', mrh?(mrh.total!=null?mrh.total:''):'');
-    const mseg=modResultadoDe('seg',a.colabId);
+    const mseg=modResultadoDe('seg',c.id);
     row.push(mseg&&mseg.medA!=null?fmt(mseg.medA):'', mseg&&mseg.medB!=null?fmt(mseg.medB):'', mseg?fmt(mseg.media):'', mseg?mseg.rot:'');
-    row.push(d.dias, d.faltas, d.relatos, a.obs);
+    row.push(d.dias, d.faltas, d.relatos, a?a.obs:'');
     linhas.push(row); });
   baixarCSV('consolidado_RH_impulso.csv', linhas);
 }
